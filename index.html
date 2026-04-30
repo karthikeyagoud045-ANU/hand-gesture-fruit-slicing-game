@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Tracking Fruit Slicer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #050505;
+      user-select: none;
+    }
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <video id="videoElement" style="display:none;" autoplay playsinline></video>
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui-layer" class="absolute inset-0 flex flex-col justify-between pointer-events-none z-20 text-[#F0F0F0] font-sans">
+    
+    <!-- Top HUD -->
+    <div id="hud-top" class="relative z-20 px-12 py-8 flex justify-between items-start hidden">
+      <div class="flex flex-col">
+        <span class="text-[10px] uppercase tracking-[0.3em] text-neutral-500 mb-1">Current Session</span>
+        <div id="hud-score" class="text-4xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-500">0</div>
+      </div>
+      <div class="flex flex-col items-center">
+        <div class="text-xs uppercase tracking-widest text-neutral-400 mb-2">Timer</div>
+        <div id="hud-timer" class="text-2xl font-mono tabular-nums bg-neutral-900 px-6 py-2 rounded-full border border-neutral-800">00:00</div>
+      </div>
+      <div class="flex flex-col items-end">
+        <span class="text-[10px] uppercase tracking-[0.3em] text-neutral-500 mb-1">Stamina / Lives</span>
+        <div id="hud-lives" class="flex gap-2">
+          <span class="text-2xl drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">❤️</span>
+          <span class="text-2xl drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">❤️</span>
+          <span class="text-2xl drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">❤️</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Start / Game Over Center Overlays -->
+    <div id="center-overlays" class="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+      <div id="start-screen" class="bg-neutral-900/80 backdrop-blur-md px-12 py-10 rounded-2xl border border-white/10 text-center pointer-events-auto shadow-2xl flex flex-col items-center">
+        <h1 class="text-5xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-500 mb-4">Fruit Tracker</h1>
+        <p class="text-xl text-neutral-300 mb-6">Choose your play mode:</p>
+        <div class="flex flex-col gap-4 w-full">
+          <button id="start-camera-btn" class="bg-white text-black px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-200 transition-colors cursor-pointer border-b-4 border-neutral-400 w-full">Play with Camera</button>
+          <button id="start-mouse-btn" class="bg-neutral-800 text-white px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-700 transition-colors cursor-pointer border-b-4 border-neutral-900 w-full">Play without Camera (Mouse)</button>
+        </div>
+      </div>
+
+      <div id="game-over-screen" class="bg-neutral-900/80 backdrop-blur-md px-12 py-10 rounded-2xl border border-white/10 text-center pointer-events-auto shadow-2xl hidden flex flex-col items-center">
+        <span class="text-[10px] uppercase tracking-[0.3em] text-red-500 mb-2">Session Terminated</span>
+        <h1 class="text-5xl font-bold tracking-tight text-white mb-6">Game Over</h1>
+        <p id="final-score" class="text-3xl font-mono tabular-nums text-neutral-300 mb-8">Score: 0</p>
+        <div class="flex gap-4 w-full justify-center">
+          <button id="home-btn-gameover" class="bg-neutral-800 text-white px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-700 transition-colors cursor-pointer border-b-4 border-neutral-900">Home</button>
+          <button id="restart-btn" class="bg-white text-black px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-200 transition-colors cursor-pointer border-b-4 border-neutral-400">Play Again</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom HUD -->
+    <div id="hud-bottom" class="relative z-20 p-8 flex justify-between items-end">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-2">
+          <div id="tracking-dot" class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
+          <span id="tracking-text" class="text-[10px] font-mono text-neutral-400 uppercase tracking-widest">Searching for Camera...</span>
+        </div>
+        <div id="hud-fps" class="text-[9px] font-mono text-neutral-600">MEDIA_PIPE_HANDS_V2.1 // FPS: 0.0</div>
+      </div>
+      <div class="flex gap-4">
+        <button id="home-btn-hud" class="bg-neutral-800 text-white px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-700 transition-colors cursor-pointer border-b-4 border-neutral-900 pointer-events-auto hidden">Home</button>
+        <button id="pause-btn" class="bg-white text-black px-10 py-4 rounded-sm font-bold uppercase tracking-[0.2em] text-sm hover:bg-neutral-200 transition-colors cursor-pointer border-b-4 border-neutral-400 pointer-events-auto hidden">Pause Game</button>
+      </div>
+    </div>
+    
+    <!-- Border overlay effect from design -->
+    <div class="absolute inset-0 border-[24px] border-neutral-900/10 pointer-events-none z-50"></div>
+  </div>
+
+  <script>
+    // --- Audio System ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    function playSliceSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      // Sweep down freq for a "swoosh"
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+      
+      gain.gain.setValueAtTime(0, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+
+      // Noise burst for the "cut/splat" splatter effect
+      const bufferSize = audioCtx.sampleRate * 0.1; // 100ms
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseFilter = audioCtx.createBiquadFilter();
+      noiseFilter.type = 'highpass';
+      noiseFilter.frequency.value = 1000;
+      
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+      
+      noise.start();
+    }
+
+    // --- Game Setup ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const videoElement = document.getElementById('videoElement');
+    
+    const uiStart = document.getElementById('start-screen');
+    const uiGameOver = document.getElementById('game-over-screen');
+    const uiFinalScore = document.getElementById('final-score');
+    const btnRestart = document.getElementById('restart-btn');
+    const btnStartCamera = document.getElementById('start-camera-btn');
+    const btnStartMouse = document.getElementById('start-mouse-btn');
+    const btnPause = document.getElementById('pause-btn');
+    const btnHomeHud = document.getElementById('home-btn-hud');
+    const btnHomeGameover = document.getElementById('home-btn-gameover');
+    
+    const hudTop = document.getElementById('hud-top');
+    const hudScore = document.getElementById('hud-score');
+    const hudTimer = document.getElementById('hud-timer');
+    const hudLives = document.getElementById('hud-lives');
+    const hudFps = document.getElementById('hud-fps');
+    const trackingDot = document.getElementById('tracking-dot');
+    const trackingText = document.getElementById('tracking-text');
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    });
+
+    // Game Variables
+    let state = 'START'; // START, PLAYING, GAMEOVER
+    let score = 0;
+    let lives = 3;
+    let gameTime = 0; // seconds
+    let lastTime = performance.now();
+    let spawnTimer = 0;
+    let spawnInterval = 1.5; // spawn every X seconds
+
+    let frames = 0;
+    let fps = 0;
+    let lastFpsTime = performance.now();
+
+    let fruits = [];
+    let particles = [];
+    let floatingTexts = [];
+    
+    // Trail system for blade
+    let pointerTrail = [];
+    const TRAIL_LENGTH = 10;
+    let currentPointer = null;
+
+    // Combo system
+    let comboTimer = 0;
+    let comboCount = 0;
+
+    const FRUIT_TYPES = [
+      { emoji: '🍉', color: '#ff3366', points: 10, radius: 60 },
+      { emoji: '🍎', color: '#ff3333', points: 10, radius: 55 },
+      { emoji: '🍊', color: '#ff9900', points: 10, radius: 55 },
+      { emoji: '🍌', color: '#ffe135', points: 10, radius: 55 },
+    ];
+    
+    const BOMB_RAD = 45;
+
+    btnStartCamera.addEventListener('click', () => {
+      startCamera();
+      resetGame();
+    });
+
+    btnStartMouse.addEventListener('click', () => {
+      enableMouseTracking();
+      resetGame();
+    });
+
+    btnRestart.addEventListener('click', () => {
+      resetGame();
+    });
+
+    btnPause.addEventListener('click', () => {
+      if (state === 'PLAYING') {
+        state = 'PAUSED';
+        btnPause.innerText = 'Resume Game';
+      } else if (state === 'PAUSED') {
+        state = 'PLAYING';
+        btnPause.innerText = 'Pause Game';
+      }
+    });
+
+    btnHomeHud.addEventListener('click', goHome);
+    btnHomeGameover.addEventListener('click', goHome);
+
+    function goHome() {
+      state = 'START';
+      uiStart.classList.remove('hidden');
+      uiGameOver.classList.add('hidden');
+      hudTop.classList.add('hidden');
+      btnPause.classList.add('hidden');
+      btnHomeHud.classList.add('hidden');
+      
+      fruits = [];
+      particles = [];
+      floatingTexts = [];
+      pointerTrail = [];
+    }
+
+    function resetGame() {
+      state = 'PLAYING';
+      score = 0;
+      lives = 3;
+      gameTime = 0;
+      spawnInterval = 1.5;
+      fruits = [];
+      particles = [];
+      floatingTexts = [];
+      comboCount = 0;
+      uiStart.classList.add('hidden');
+      uiGameOver.classList.add('hidden');
+      hudTop.classList.remove('hidden');
+      btnPause.classList.remove('hidden');
+      btnHomeHud.classList.remove('hidden');
+      btnPause.innerText = 'Pause Game';
+    }
+
+    function spawnFruit() {
+      // Scale difficulty based on score or time
+      let level = Math.floor(score / 50);
+      let isBomb = false;
+      
+      // Introduce bombs after score 100
+      if (score >= 100 && Math.random() < 0.2 + (level * 0.05)) {
+        isBomb = true;
+      }
+
+      const isSideSpawn = Math.random() > 0.5;
+      let x, y, vx, vy;
+      
+      // Increase speed over time up to a threshold, but slower
+      const speedMult = 1 + Math.min((gameTime / 60) * 0.3, 0.6); 
+
+      if (isSideSpawn) {
+        // Spawn from sides arcing towards center
+        y = height * 0.6 + Math.random() * (height * 0.3);
+        if (Math.random() > 0.5) {
+          x = -50;
+          vx = (Math.random() * 3 + 3) * speedMult;
+        } else {
+          x = width + 50;
+          vx = (-Math.random() * 3 - 3) * speedMult;
+        }
+        vy = (-Math.random() * 6 - 10) * speedMult;
+      } else {
+        // Spawn from bottom
+        x = width * 0.2 + Math.random() * (width * 0.6);
+        y = height + 50;
+        vx = (Math.random() * 4 - 2) * speedMult;
+        vy = (-Math.random() * 4 - 13) * speedMult;
+      }
+      
+      if (isBomb) {
+        fruits.push({
+          type: 'bomb',
+          x, y, vx, vy,
+          radius: BOMB_RAD,
+          rotation: 0,
+          angVel: Math.random() * 0.2 - 0.1,
+          sliced: false
+        });
+      } else {
+        const fType = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
+        fruits.push({
+          type: 'fruit',
+          emoji: fType.emoji,
+          color: fType.color,
+          points: fType.points,
+          radius: fType.radius,
+          x, y, vx, vy,
+          rotation: 0,
+          angVel: Math.random() * 0.2 - 0.1,
+          sliced: false,
+          half: 0 // 0=whole, 1=left half, 2=right half
+        });
+      }
+    }
+    
+    function createParticles(x, y, color) {
+      for (let i = 0; i < 15; i++) {
+        particles.push({
+          x: x,
+          y: y,
+          vx: Math.random() * 10 - 5,
+          vy: Math.random() * 10 - 5,
+          life: 1.0,
+          color: color,
+          size: Math.random() * 8 + 4
+        });
+      }
+    }
+    
+    function checkCollisions() {
+      if (pointerTrail.length < 2) return;
+      
+      const p1 = pointerTrail[pointerTrail.length - 1]; // current point
+      const p2 = pointerTrail[pointerTrail.length - 2]; // prev point
+
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        const f = fruits[i];
+        if (f.sliced) continue;
+
+        // Line-circle collision detecting algorithm
+        const dist = distToSegment(f, p1, p2);
+        
+        if (dist < f.radius) {
+          // It's a hit!
+          f.sliced = true;
+          
+          if (f.type === 'bomb') {
+            // Sliced bomb -> Deduct score instead of game over (unlimited lives)
+            createParticles(f.x, f.y, '#ffffff');
+            score = Math.max(0, score - 50); // 50 point penalty
+            floatingTexts.push({ x: f.x, y: f.y - 30, text: `-50`, life: 1.5, color: '#ff0000' });
+          } else {
+             // Play satisfying sound
+             playSliceSound();
+             // Splatter effect matching fruit color
+             createParticles(f.x, f.y, f.color);
+             
+             // Splitting logic: replace whole fruit with two halves flying apart
+             fruits.splice(i, 1);
+             
+             const sliceAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+             
+             // Left half part
+             fruits.push({
+               ...f, sliced: true, half: 1, 
+               vx: f.vx - Math.sin(sliceAngle) * 3, 
+               vy: f.vy + Math.cos(sliceAngle) * 3
+             });
+             // Right half part
+             fruits.push({
+               ...f, sliced: true, half: 2, 
+               vx: f.vx + Math.sin(sliceAngle) * 3, 
+               vy: f.vy - Math.cos(sliceAngle) * 3
+             });
+             
+             comboCount++;
+             comboTimer = 1.0; // 1 second window to chain combos
+             
+             let pts = f.points;
+             if (comboCount >= 3) {
+                pts += comboCount * 2; // Bonus points for combo
+                floatingTexts.push({ x: f.x, y: f.y - 30, text: `COMBO x${comboCount}`, life: 1.5, color: '#ffffff' });
+             } else {
+                floatingTexts.push({ x: f.x, y: f.y - 10, text: `+${pts}`, life: 1.0, color: '#facc15' });
+             }
+             
+             score += pts;
+          }
+        }
+      }
+    }
+    
+    // --- Math helpers for collision ---
+    function dist2(v, w) { return (v.x - w.x)**2 + (v.y - w.y)**2; }
+    function distToSegmentSquared(p, v, w) {
+      const l2 = dist2(v, w);
+      if (l2 === 0) return dist2(p, v);
+      let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+      t = Math.max(0, Math.min(1, t));
+      return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
+    }
+    function distToSegment(p, v, w) { return Math.sqrt(distToSegmentSquared(p, v, w)); }
+
+
+    // --- Game Logic Loop ---
+    function update(dt) {
+      if (state === 'START' || state === 'GAMEOVER' || state === 'PAUSED') {
+        return;
+      }
+
+      gameTime += dt;
+      comboTimer -= dt;
+      if (comboTimer <= 0) {
+        comboCount = 0;
+      }
+
+      // Bump difficulty
+      if (spawnInterval > 0.4) {
+        spawnInterval = 1.5 - (gameTime / 60) * 0.8; 
+      }
+
+      // Handle Spawns
+      spawnTimer += dt;
+      if (spawnTimer >= Math.max(0.3, spawnInterval)) {
+        spawnFruit();
+        spawnTimer = 0;
+      }
+
+      // Move entities
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        const f = fruits[i];
+        f.x += f.vx;
+        f.y += f.vy;
+        f.vy += 12 * dt; // gravity arc (reduced for slower pacing)
+        f.rotation += f.angVel;
+
+        // Despawn off bottom screen
+        if (f.y > height + 100) {
+          // Missed an unsliced fruit!
+          if (!f.sliced && f.type === 'fruit' && !f.half) {
+            floatingTexts.push({ x: f.x, y: height - 50, text: 'MISS!', life: 1.0, color: '#f00' });
+          }
+          fruits.splice(i, 1);
+        }
+      }
+
+      checkCollisions();
+
+      // Simulate physics for juice splatter particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 15 * dt; // gravity pulls juice down
+        p.life -= dt * 1.5;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+      
+      // Float up score texts
+      for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        const t = floatingTexts[i];
+        t.y -= 20 * dt;
+        t.life -= dt;
+        if (t.life <= 0) floatingTexts.splice(i, 1);
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, width, height);
+
+      // Render mirrored background video
+      // This is crucial for matching realistic body coordination
+      if (videoElement.readyState === 4 && cameraStarted) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        let vRatio = videoElement.videoWidth / videoElement.videoHeight;
+        let cRatio = width / height;
+        let dWidth, dHeight;
+        if (cRatio > vRatio) {
+          dWidth = width;
+          dHeight = width / vRatio;
+        } else {
+          dHeight = height;
+          dWidth = height * vRatio;
+        }
+        let dx = (width - dWidth)/2;
+        let dy = (height - dHeight)/2;
+        
+        ctx.drawImage(videoElement, -dx - dWidth, dy, dWidth, dHeight);
+        ctx.restore();
+        
+        // Add a dark overlay so neon trails/fruits pop visually against busy webcam backgrounds
+        ctx.fillStyle = 'rgba(5, 5, 5, 0.6)';
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        // Fallback dark themed ground
+        let grad = ctx.createLinearGradient(0, 0, 0, height);
+        grad.addColorStop(0, '#0a0a0a');
+        grad.addColorStop(1, '#050505');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // Draw Fruits and Bombs
+      for (const f of fruits) {
+        ctx.save();
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.rotation);
+        
+        if (f.type === 'bomb') {
+          ctx.beginPath();
+          ctx.arc(0, 0, f.radius, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff0000';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(0, 0, f.radius * 0.8, 0, Math.PI * 2);
+          ctx.fillStyle = '#222';
+          ctx.fill();
+          // Bomb Fuse
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(0, -f.radius);
+          ctx.quadraticCurveTo(15, -f.radius - 15, 20, -f.radius - 5);
+          ctx.stroke();
+        } else {
+          ctx.font = `${f.radius * 2}px Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          if (!f.half) {
+             ctx.fillText(f.emoji, 0, 0);
+          } else {
+             // Draw half emoji using path clipping to accurately split it exactly
+             ctx.beginPath();
+             if (f.half === 1) { // Left half
+               ctx.rect(-f.radius, -f.radius, f.radius, f.radius * 2);
+             } else { // Right half
+               ctx.rect(0, -f.radius, f.radius, f.radius * 2);
+             }
+             ctx.clip();
+             ctx.fillText(f.emoji, 0, 0);
+          }
+        }
+        ctx.restore();
+      }
+
+      // Draw Particles
+      for (const p of particles) {
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
+
+      // Draw Glowing Slash Trail
+      if (pointerTrail.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(pointerTrail[0].x, pointerTrail[0].y);
+        for (let i = 1; i < pointerTrail.length; i++) {
+          ctx.lineTo(pointerTrail[i].x, pointerTrail[i].y);
+        }
+        
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        
+        // Neon-style layering glow
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.4)';
+        ctx.lineWidth = 15;
+        ctx.stroke();
+        
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 8;
+        ctx.stroke();
+        
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // Update DOM HUD (UI layer)
+      if (state !== 'START') {
+        hudScore.innerText = score.toLocaleString();
+        let mins = Math.floor(gameTime / 60);
+        let secs = Math.floor(gameTime % 60);
+        hudTimer.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        
+        let livesHtml = '<span class="text-2xl drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]">❤️ ∞</span>';
+        if (hudLives.innerHTML !== livesHtml) hudLives.innerHTML = livesHtml;
+      }
+
+      // Float Texts (Points, Combos)
+      for (const t of floatingTexts) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, t.life));
+        ctx.fillStyle = t.color;
+        if (t.text.startsWith('COMBO')) {
+          ctx.font = '900 italic 48px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = 'rgba(255,255,255,0.8)';
+          ctx.shadowBlur = 15;
+          ctx.fillText(t.text, t.x, t.y);
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.font = 'bold italic 24px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = 'rgba(0,0,0,1)';
+          ctx.shadowBlur = 5;
+          ctx.fillText(t.text, t.x, t.y);
+          ctx.shadowBlur = 0;
+        }
+      }
+      ctx.globalAlpha = 1.0;
+      
+      // Update Debug FPS Counter
+      hudFps.innerText = `MEDIA_PIPE_HANDS_V2.1 // FPS: ${fps.toFixed(1)}`;
+
+      if (state === 'PAUSED') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 48px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('PAUSED', width / 2, height / 2);
+      }
+    }
+
+    function gameLoop(time) {
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+      
+      // Calculate framerate
+      frames++;
+      if (time - lastFpsTime >= 1000) {
+        fps = frames;
+        frames = 0;
+        lastFpsTime = time;
+      }
+
+      // Slash Trail mechanics - smoothly decay old positions
+      if (!currentPointer && pointerTrail.length > 0) {
+        pointerTrail.shift();
+      } else if (currentPointer) {
+        pointerTrail.push({ ...currentPointer });
+        if (pointerTrail.length > TRAIL_LENGTH) pointerTrail.shift();
+      }
+
+      update(dt);
+      draw();
+      
+      currentPointer = null; // Clear to wait for next hardware event frame
+      
+      requestAnimationFrame(gameLoop);
+    }
+    
+    // Boot the render loop
+    requestAnimationFrame(gameLoop);
+
+    // --- Core MediaPipe Hand Tracking Implementation ---
+    const hands = new Hands({locateFile: (file) => {
+      // Use CDN
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 0, // Lower complexity for faster tracking
+      minDetectionConfidence: 0.3, // Lower confidence to find hands faster
+      minTrackingConfidence: 0.3
+    });
+
+    hands.onResults((results) => {
+      trackingText.innerText = 'Tracking Active (Index_Finger_Tip)';
+      trackingDot.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]';
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        // Track the index finger tip (landmark #8)
+        const point = results.multiHandLandmarks[0][8]; 
+        
+        // Results are normalized 0.0-1.0.
+        // We flip the X coordinate (1-point.x) to match our mirrored canvas
+        currentPointer = {
+          x: (1 - point.x) * width,
+          y: point.y * height
+        };
+      }
+    });
+
+    let cameraInstance = null;
+    let cameraStarted = false;
+    let mouseTrackingEnabled = false;
+
+    function startCamera() {
+      if (cameraStarted) return;
+      cameraStarted = true;
+      trackingText.innerText = 'Initializing Camera...';
+      trackingDot.className = 'w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_8px_#eab308]';
+      cameraInstance = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+      });
+      cameraInstance.start().catch((err) => {
+        console.warn("Camera failed", err);
+        trackingText.innerText = 'Camera Error - Fallback to Mouse';
+        trackingDot.className = 'w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]';
+        enableMouseTracking();
+      });
+    }
+
+    function enableMouseTracking() {
+      if (mouseTrackingEnabled) return;
+      mouseTrackingEnabled = true;
+      canvas.addEventListener('mousemove', (e) => {
+        if (state === 'PLAYING') {
+          currentPointer = { x: e.clientX, y: e.clientY };
+        }
+      });
+      canvas.addEventListener('touchmove', (e) => {
+        if (state === 'PLAYING') {
+          e.preventDefault();
+          currentPointer = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+      }, { passive: false });
+      trackingText.innerText = 'Tracking Active (Mouse/Touch)';
+      trackingDot.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]';
+    }
+
+  </script>
+</body>
+</html>
+

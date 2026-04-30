@@ -1,0 +1,8 @@
+{
+  "name": "Hand Tracking Fruit Slicer",
+  "description": "A fruit slicing game using webcam and MediaPipe hand tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
