@@ -113,7 +113,3 @@ hand-gesture-fruit-slicing-game/
 5. **Collision detection** checks if the trail intersects with fruit objects
 
 ---
-
-## 📝 License
-
-MIT License — feel free to use, modify, and distribute.
